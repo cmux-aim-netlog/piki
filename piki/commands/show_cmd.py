@@ -57,22 +57,19 @@ def _parse_graph() -> dict:
             for link in re.findall(r'\[\[([^\]]+)\]\]', text):
                 edges.append({"source": node_id, "target": link.strip()})
 
-            # 마크다운 링크 [text](path.md)
-            for link in re.findall(r'\[(?:[^\]]+)\]\(([^)]+\.md)\)', text):
-                target = re.sub(r'#.*$', '', link).strip()  # 앵커 제거
-                target = str((md.parent / target).resolve().relative_to(WIKI_DIR).with_suffix(""))
-                edges.append({"source": node_id, "target": target})
+            # 관련: 섹션의 링크만 파싱
+            related_match = re.search(r'관련:\s*\n((?:[ \t]*[-*]\s*.*\n?)*)', text)
+            if related_match:
+                for link in re.findall(r'\(([^)]+\.md)\)', related_match.group(1)):
+                    target = re.sub(r'#.*$', '', link).strip()
+                    try:
+                        target_id = str((md.parent / target).resolve().relative_to(WIKI_DIR).with_suffix(""))
+                        edges.append({"source": node_id, "target": target_id})
+                    except ValueError:
+                        pass
 
         except Exception:
             pass
-
-    # 디렉토리 부모-자식 엣지
-    for node_id in list(nodes):
-        parts = node_id.split("/")
-        for i in range(1, len(parts)):
-            parent = "/".join(parts[:i])
-            if parent in nodes:
-                edges.append({"source": parent, "target": node_id})
 
     valid = set(nodes)
     seen = set()
