@@ -11,7 +11,7 @@ pip install -e .
 ## 시작하기
 
 ```bash
-piki wiki setup    # 위키 클론 및 검색 인덱스 생성
+piki setup    # 위키 클론 및 검색 인덱스 생성
 ```
 
 ## 명령어
@@ -19,13 +19,13 @@ piki wiki setup    # 위키 클론 및 검색 인덱스 생성
 ### wiki
 
 ```bash
-piki wiki setup                   # 위키 초기 설정 (~/.wiki/ 에 클론)
-piki wiki sync                    # 최신 위키 pull + 인덱스 재생성
-piki wiki search <query>          # 전체 문서 전문 검색
-piki wiki read <path>             # 특정 페이지 읽기 (예: repos/auth-service/gotchas)
-piki wiki context <files...>      # 편집할 파일과 관련된 위키 페이지 조회
-piki wiki gotchas <repo>          # 해당 레포의 알려진 함정/금지 패턴 조회
-piki wiki adr [--topic <topic>]   # 아키텍처 결정 기록(ADR) 목록/검색
+piki setup                   # 위키 초기 설정 (~/.wiki/ 에 클론)
+piki sync                    # 최신 위키 pull + 인덱스 재생성
+piki search <query>          # 전체 문서 전문 검색
+piki read <path>             # 특정 페이지 읽기 (예: repos/auth-service/gotchas)
+piki context <files...>      # 편집할 파일과 관련된 위키 페이지 조회
+piki gotchas <repo>          # 해당 레포의 알려진 함정/금지 패턴 조회
+piki adr [--topic <topic>]   # 아키텍처 결정 기록(ADR) 목록/검색
 ```
 
 ### config

@@ -4,7 +4,7 @@ from rich.panel import Panel
 
 from piki import __version__
 from piki.commands.config_cmd import app as config_app
-from piki.commands.wiki_cmd import app as wiki_app
+from piki.commands import wiki_cmd
 
 app = typer.Typer(
     name="piki",
@@ -14,7 +14,17 @@ app = typer.Typer(
 console = Console()
 
 app.add_typer(config_app, name="config")
-app.add_typer(wiki_app, name="wiki")
+
+for _cmd in [
+    wiki_cmd.setup,
+    wiki_cmd.sync,
+    wiki_cmd.search,
+    wiki_cmd.read,
+    wiki_cmd.context,
+    wiki_cmd.gotchas,
+    wiki_cmd.adr,
+]:
+    app.command()(_cmd)
 
 
 @app.callback(invoke_without_command=True)

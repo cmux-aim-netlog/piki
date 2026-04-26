@@ -6,21 +6,19 @@ from rich.console import Console
 
 from piki.wiki import WIKI_DIR, WIKI_REPO, db, render
 
-app = typer.Typer(help="piki wiki — team context hub for coding agents.")
 console = Console()
 
 
 def _require_wiki():
     if not WIKI_DIR.exists():
-        console.print("[red]Wiki not set up.[/] Run [bold]piki wiki setup[/] first.")
+        console.print("[red]Wiki not set up.[/] Run [bold]piki setup[/] first.")
         raise typer.Exit(1)
 
 
-@app.command()
 def setup():
     """Clone the wiki repo to ~/.wiki/ and build the search index."""
     if WIKI_DIR.exists():
-        console.print("[yellow]Wiki already set up.[/] Run [bold]piki wiki sync[/] to update.")
+        console.print("[yellow]Wiki already set up.[/] Run [bold]piki sync[/] to update.")
         raise typer.Exit(0)
     console.print(f"[bold]Cloning wiki[/] → {WIKI_DIR}")
     result = subprocess.run(["git", "clone", WIKI_REPO, str(WIKI_DIR)], capture_output=True, text=True)
@@ -29,10 +27,9 @@ def setup():
         raise typer.Exit(1)
     console.print("[dim]Building search index...[/]")
     db.build_index()
-    console.print("[green]✓[/] Wiki ready. Try [bold]piki wiki search <query>[/]")
+    console.print("[green]✓[/] Wiki ready. Try [bold]piki search <query>[/]")
 
 
-@app.command()
 def sync():
     """Pull latest changes and rebuild search index."""
     _require_wiki()
@@ -47,7 +44,6 @@ def sync():
     console.print("[green]✓[/] Wiki synced.")
 
 
-@app.command()
 def search(query: str):
     """Full-text search across all wiki pages."""
     _require_wiki()
@@ -55,36 +51,31 @@ def search(query: str):
     render.render_search_results(results)
 
 
-@app.command()
 def read(path: str):
     """Read a wiki page. Example: repos/auth-service/gotchas"""
     _require_wiki()
     render.render_page(path)
 
 
-@app.command()
 def context(files: list[str] = typer.Argument(..., help="Files you are about to edit.")):
     """Show wiki pages relevant to the files you're editing."""
     _require_wiki()
     results = db.context_for_files(files)
     if not results:
-        # fall back to filename-based FTS search
         for f in files:
             stem = Path(f).stem
             results += db.search(stem, limit=3)
     render.render_results(results, title=f"Context for {', '.join(files)}")
     if results:
-        console.print("\n[dim]Run [bold]piki wiki read <path>[/] to open a page.[/]")
+        console.print("\n[dim]Run [bold]piki read <path>[/] to open a page.[/]")
 
 
-@app.command()
 def gotchas(repo: str):
     """Show known traps and deprecated patterns for a repo."""
     _require_wiki()
     render.render_page(f"repos/{repo}/gotchas")
 
 
-@app.command()
 def adr(topic: str = typer.Option("", "--topic", "-t", help="Topic to search for.")):
     """List or search Architecture Decision Records."""
     _require_wiki()
