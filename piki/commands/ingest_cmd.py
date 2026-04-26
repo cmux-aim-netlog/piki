@@ -331,7 +331,20 @@ def ingest_pr(
                  f"piki: ingest {source_repo}@{head_short} ({len(pages)} pages)"],
                 check=True, env=env,
             )
-            subprocess.run(["git", "-C", str(work), "push", "origin", "HEAD"], check=True, env=env)
+            for attempt in range(1, 6):
+                result = subprocess.run(
+                    ["git", "-C", str(work), "push", "origin", "HEAD"],
+                    env=env, capture_output=True, text=True,
+                )
+                if result.returncode == 0:
+                    break
+                if attempt == 5:
+                    raise subprocess.CalledProcessError(result.returncode, result.args)
+                console.print(f"  [yellow]push rejected (attempt {attempt}/5) — pulling rebase[/]")
+                subprocess.run(
+                    ["git", "-C", str(work), "pull", "--rebase", "--autostash", "origin", "main"],
+                    check=True, env=env, capture_output=True, text=True,
+                )
             console.print("[bold green]✓ pushed to wiki[/]")
         else:
             console.print(f"[yellow]--no-push: changes left in[/] {work}")
