@@ -1,0 +1,20 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "piki"
+version = "0.1.0"
+description = "A CLI dev tool"
+requires-python = ">=3.10"
+dependencies = [
+    "typer>=0.12",
+    "rich>=13",
+]
+
+[project.scripts]
+piki = "piki.main:app"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["piki*"]
