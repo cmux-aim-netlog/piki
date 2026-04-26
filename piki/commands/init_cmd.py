@@ -160,29 +160,61 @@ def _wiki_log(org: str) -> str:
 
 
 def _wiki_dispatch_workflow() -> str:
-    return """name: piki-repo-dispatch
+    return """name: piki-ingest
 
 on:
   repository_dispatch:
     types:
       - piki_source_repo_merged
+  workflow_dispatch:
+    inputs:
+      org:
+        description: "Source repo's organization"
+        required: true
+      source_repo:
+        description: "Source repository name (under the org)"
+        required: true
+      head_sha:
+        description: "Head commit SHA to ingest"
+        required: true
+      base_sha:
+        description: "Base commit SHA (optional; omit for snapshot mode)"
+        required: false
+        default: ""
 
 permissions:
-  contents: read
+  contents: write
+
+concurrency:
+  group: piki-ingest
+  cancel-in-progress: false
 
 jobs:
-  receive-merge-event:
-    if: github.event.client_payload.pr_merged == true && github.event.client_payload.base_ref == 'main'
+  ingest:
     runs-on: ubuntu-latest
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.client_payload.pr_merged == true || github.event.client_payload.pr_merged == 'true') &&
+      (github.event.client_payload.base_ref == 'main' || github.event.client_payload.base_ref == 'master')
     steps:
-      - name: Print received payload
-        run: |
-          echo "Received merge event from source repo."
-          echo "org=${{ github.event.client_payload.org }}"
-          echo "repo=${{ github.event.client_payload.repo }}"
-          echo "sha=${{ github.event.client_payload.sha }}"
-          echo "pr_number=${{ github.event.client_payload.pr_number }}"
-          echo "pr_url=${{ github.event.client_payload.pr_url }}"
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install piki
+        run: pip install --quiet "git+https://github.com/cmux-aim-netlog/piki.git@main"
+      - name: Run ingest
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          # PIKI_BOT_TOKEN must allow read on source repo + write on this wiki repo.
+          GITHUB_TOKEN: ${{ secrets.PIKI_BOT_TOKEN }}
+          PIKI_WIKI_REPO: ${{ github.event.repository.name }}
+          # repository_dispatch path: env vars below stay empty and ingest_pr will
+          # parse GITHUB_EVENT_PATH. workflow_dispatch path: explicit inputs below.
+          PIKI_ORG: ${{ github.event.inputs.org }}
+          PIKI_SOURCE_REPO: ${{ github.event.inputs.source_repo }}
+          PIKI_HEAD_SHA: ${{ github.event.inputs.head_sha }}
+          PIKI_BASE_SHA: ${{ github.event.inputs.base_sha }}
+        run: piki ingest-pr
 """
 
 
@@ -263,11 +295,12 @@ def _action_guide_md(org: str, repo: str, wiki_repo: str) -> str:
         "이 파일은 `piki init`으로 자동 생성되었습니다.\n\n"
         "## 목적\n"
         f"- `{repo}` 에서 `main` 대상 PR merge 시 `{wiki_repo}` 저장소로 이벤트를 전달합니다.\n\n"
-        "## 필수 시크릿\n"
-        "- `PIKI_BOT_TOKEN`: `repo` 권한이 있는 GitHub 토큰\n\n"
+        "## 필수 시크릿 (Org-level Actions secret 권장)\n"
+        "- `PIKI_BOT_TOKEN`: source repo `contents:read` + wiki repo `contents:write` 권한이 있는 GitHub 토큰.\n"
+        f"- `GEMINI_API_KEY`: Gemini API key. `{wiki_repo}` 의 ingest workflow가 LLM 호출 시 사용.\n\n"
         "## 워크플로우\n"
-        "- 파일 경로: `.github/workflows/piki-sync.yml`\n"
-        "- 트리거: `pull_request.closed` + `merged == true` + `base.ref == main`\n\n"
+        f"- 트리거 (source side): `{repo}/.github/workflows/piki-sync.yml` — `pull_request.closed` + `merged == true` + `base.ref == main` → `repository_dispatch` to `{wiki_repo}`.\n"
+        f"- ingest (wiki side): `{wiki_repo}/.github/workflows/piki-ingest.yml` — `repository_dispatch` 또는 `workflow_dispatch` 로 실행.\n\n"
         f"Organization: `{org}`\n"
     )
 
@@ -325,9 +358,9 @@ def init(
         ("meta/stale.md", "# Stale Pages\n\n- (none)\n", "chore(piki): add stale tracker"),
         ("meta/orphans.md", "# Orphan Pages\n\n- (none)\n", "chore(piki): add orphan tracker"),
         (
-            ".github/workflows/piki-repo-dispatch.yml",
+            ".github/workflows/piki-ingest.yml",
             _wiki_dispatch_workflow(),
-            "chore(piki): add repository_dispatch ingest trigger",
+            "chore(piki): add LLM ingest workflow (repository_dispatch + workflow_dispatch)",
         ),
     ]
 

@@ -7,6 +7,7 @@ from piki.commands.config_cmd import app as config_app
 from piki.commands import wiki_cmd
 from piki.commands import init_cmd
 from piki.commands import skill_cmd
+from piki.commands import ingest_cmd
 
 app = typer.Typer(
     name="piki",
@@ -34,6 +35,9 @@ for _cmd in [
     wiki_cmd.serve,
 ]:
     app.command()(_cmd)
+
+# Register hyphenated command names explicitly (Typer keeps underscores by default).
+app.command(name="ingest-pr")(ingest_cmd.ingest_pr)
 
 
 @app.callback(invoke_without_command=True)
