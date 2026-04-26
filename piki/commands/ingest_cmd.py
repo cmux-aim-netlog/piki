@@ -398,7 +398,7 @@ def _commit_and_push(work: Path, message: str) -> bool:
             raise subprocess.CalledProcessError(result.returncode, push_cmd, stderr=stderr)
         console.print(f"  [yellow]push rejected (attempt {attempt}/5) — pulling rebase[/]")
         subprocess.run(
-            ["git", "-C", str(work), "pull", "--rebase", "--autostash", "origin", "HEAD"],
+            ["git", "-C", str(work), "pull", "--rebase", "--autostash", "origin", "main"],
             check=True, env=env, capture_output=True, text=True,
         )
     return True
