@@ -1,0 +1,62 @@
+name: piki-sync-trigger
+
+on:
+  pull_request:
+    branches:
+      - main
+    types:
+      - closed
+
+permissions:
+  contents: read
+
+jobs:
+  notify-piki:
+    if: github.event.pull_request.merged == true && github.event.pull_request.base.ref == 'main'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Dispatch merge event to wiki repository
+        env:
+          GH_TOKEN: "${{ secrets.PIKI_BOT_TOKEN }}"
+          REPOSITORY: "${{ github.repository }}"
+          REPO: "piki"
+          ORG: "cmux-aim-netlog"
+          WIKI_REPO: "wiki"
+          WIKI_BRANCH: "main"
+          SHA: "${{ github.event.pull_request.merge_commit_sha }}"
+          REF: "${{ github.event.pull_request.base.ref }}"
+          EVENT_NAME: "${{ github.event_name }}"
+          PR_NUMBER: "${{ github.event.pull_request.number }}"
+          PR_MERGED: "${{ github.event.pull_request.merged }}"
+          BASE_REF: "${{ github.event.pull_request.base.ref }}"
+          HEAD_REF: "${{ github.event.pull_request.head.ref }}"
+          PR_TITLE: "${{ github.event.pull_request.title }}"
+          PR_URL: "${{ github.event.pull_request.html_url }}"
+        run: |
+          if [ -z "$GH_TOKEN" ]; then
+            echo "PIKI_BOT_TOKEN secret is not configured."
+            exit 1
+          fi
+
+          payload=$(cat <<EOF
+          {
+            "org": "$ORG",
+            "repo": "$REPO",
+            "repository": "$REPOSITORY",
+            "sha": "$SHA",
+            "ref": "$REF",
+            "event": "$EVENT_NAME",
+            "pr_number": "$PR_NUMBER",
+            "pr_merged": "$PR_MERGED",
+            "base_ref": "$BASE_REF",
+            "head_ref": "$HEAD_REF",
+            "pr_title": "$PR_TITLE",
+            "pr_url": "$PR_URL"
+          }
+          EOF
+          )
+
+          curl -sS -X POST "https://api.github.com/repos/$ORG/$WIKI_REPO/dispatches"             -H "Accept: application/vnd.github+json"             -H "Authorization: Bearer $GH_TOKEN"             -H "X-GitHub-Api-Version: 2022-11-28"             -H "Content-Type: application/json"             -d "{
+              \"event_type\": \"piki_source_repo_merged\",
+              \"client_payload\": $payload
+            }"
