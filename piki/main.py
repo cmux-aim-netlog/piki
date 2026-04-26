@@ -5,6 +5,7 @@ from rich.panel import Panel
 from piki import __version__
 from piki.commands.config_cmd import app as config_app
 from piki.commands import wiki_cmd
+from piki.commands import init_cmd
 
 app = typer.Typer(
     name="piki",
@@ -16,6 +17,7 @@ console = Console()
 app.add_typer(config_app, name="config")
 
 for _cmd in [
+    init_cmd.init,
     wiki_cmd.setup,
     wiki_cmd.sync,
     wiki_cmd.search,

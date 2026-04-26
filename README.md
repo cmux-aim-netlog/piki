@@ -16,6 +16,14 @@ piki setup    # 위키 클론 및 검색 인덱스 생성
 
 ## 명령어
 
+### bootstrap
+
+```bash
+piki init --org cmux-aim-netlog --wiki-repo wiki --source-repos Test_BE,Test_FE,piki --dry-run
+# 실제 반영 시:
+# GITHUB_TOKEN=<token> piki init --org cmux-aim-netlog --wiki-repo wiki --source-repos Test_BE,Test_FE,piki
+```
+
 ### wiki
 
 ```bash
