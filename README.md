@@ -21,6 +21,8 @@ piki install
 #    GITHUB_TOKEN은 쉘 환경변수로만 주입 (코드/깃에 절대 저장 금지)
 GITHUB_TOKEN=<token> piki init --org cmux-aim-netlog --wiki-repo wiki --source-repos Test_BE,Test_FE,piki --dry-run
 GITHUB_TOKEN=<token> piki init --org cmux-aim-netlog --wiki-repo wiki --source-repos Test_BE,Test_FE,piki
+# 기존 source repo의 piki 관리 파일을 유지하려면(덮어쓰기 비활성화):
+GITHUB_TOKEN=<token> piki init --org cmux-aim-netlog --wiki-repo wiki --source-repos Test_BE,Test_FE,piki --no-sync-source-files
 
 # 4) ingest 1회 실행 (graph-wiki 생성)
 piki ingest
@@ -37,6 +39,8 @@ piki serve --port 8787
 piki init --org cmux-aim-netlog --wiki-repo wiki --source-repos Test_BE,Test_FE,piki --dry-run
 # 실제 반영 시:
 # GITHUB_TOKEN=<token> piki init --org cmux-aim-netlog --wiki-repo wiki --source-repos Test_BE,Test_FE,piki
+# source repo의 piki 관리 파일 자동 갱신을 끄려면:
+# GITHUB_TOKEN=<token> piki init --org cmux-aim-netlog --wiki-repo wiki --source-repos Test_BE,Test_FE,piki --no-sync-source-files
 ```
 
 ### skill
