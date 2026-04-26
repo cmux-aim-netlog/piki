@@ -66,8 +66,8 @@
   "hotPaths": [
     {
       "path": "pyproject.toml",
-      "accessCount": 3,
-      "lastAccessed": 1777178916245,
+      "accessCount": 4,
+      "lastAccessed": 1777180046323,
       "type": "file"
     },
     {
@@ -164,6 +164,12 @@
       "path": "piki/commands/__init__.py",
       "accessCount": 1,
       "lastAccessed": 1777178932292,
+      "type": "file"
+    },
+    {
+      "path": "Formula/piki.rb",
+      "accessCount": 1,
+      "lastAccessed": 1777180058433,
       "type": "file"
     }
   ],
