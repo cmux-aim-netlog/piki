@@ -53,17 +53,37 @@ def _parse_graph() -> dict:
                 "content": text[:600],
             }
 
+            # [[wiki-link]] 문법
             for link in re.findall(r'\[\[([^\]]+)\]\]', text):
                 edges.append({"source": node_id, "target": link.strip()})
+
+            # 마크다운 링크 [text](path.md)
+            for link in re.findall(r'\[(?:[^\]]+)\]\(([^)]+\.md)\)', text):
+                target = re.sub(r'#.*$', '', link).strip()  # 앵커 제거
+                target = str((md.parent / target).resolve().relative_to(WIKI_DIR).with_suffix(""))
+                edges.append({"source": node_id, "target": target})
 
         except Exception:
             pass
 
+    # 디렉토리 부모-자식 엣지
+    for node_id in list(nodes):
+        parts = node_id.split("/")
+        for i in range(1, len(parts)):
+            parent = "/".join(parts[:i])
+            if parent in nodes:
+                edges.append({"source": parent, "target": node_id})
+
     valid = set(nodes)
-    return {
-        "nodes": list(nodes.values()),
-        "edges": [e for e in edges if e["source"] in valid and e["target"] in valid],
-    }
+    seen = set()
+    deduped = []
+    for e in edges:
+        key = (e["source"], e["target"])
+        if key not in seen and e["source"] in valid and e["target"] in valid and e["source"] != e["target"]:
+            seen.add(key)
+            deduped.append(e)
+
+    return {"nodes": list(nodes.values()), "edges": deduped}
 
 
 def _build_html(graph: dict) -> str:
