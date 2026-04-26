@@ -519,9 +519,16 @@ def ingest_pr(
         log_text += f"- [{ts}] {source_repo}@{head_short}: {log_entry}\n"
         log_file.write_text(log_text, encoding="utf-8")
 
-        # 8. Backlinks (code, idempotent)
-        n_bl = _inject_backlinks(work)
-        console.print(f"  [dim]backlinks updated on {n_bl} page(s)[/]")
+        # 8. Backlinks: deliberately NOT run here.
+        # Per-repo ingests run in parallel; backlink blocks live in shared
+        # pages (index.md, README.md, neighbor overviews). If two ingests
+        # both rewrite a backlink block from the same base, rebase
+        # conflicts and `_commit_and_push` cannot recover. The concepts
+        # workflow (auto-triggered after each ingest via `workflow_run`,
+        # cancel-in-progress=true so only one runs at a time) regenerates
+        # backlinks idempotently from the latest wiki state. So the per-
+        # repo commit only touches `repos/<self>/*` (no overlap) and
+        # `log.md` (union-merge handles overlap).
 
         # 9. Commit + push
         if push:
