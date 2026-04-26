@@ -88,6 +88,44 @@ def _clone_wiki(org: str, wiki_repo: str, token: str, dest: Path) -> None:
         ["git", "clone", "--depth=10", auth_url, str(dest)],
         check=True, capture_output=True, text=True,
     )
+    _ensure_gitattributes(dest)
+
+
+def _ensure_gitattributes(work: Path) -> None:
+    """Idempotently declare `log.md merge=union` so parallel ingest workers
+    don't conflict on append-only files during rebase.
+
+    Two places, on purpose:
+
+    1. `.git/info/attributes` (local, never committed) — picked up by the
+       rebase that may happen below in this same ingest. Without this, a
+       fresh clone from an older wiki repo (which doesn't yet have a
+       committed `.gitattributes`) would still hit the conflict on the
+       very first parallel run.
+    2. `.gitattributes` (committed, persisted in wiki repo) — ensures the
+       attribute survives across future fresh clones.
+    """
+    needed_line = "log.md merge=union"
+
+    info_attr = work / ".git" / "info" / "attributes"
+    info_attr.parent.mkdir(parents=True, exist_ok=True)
+    existing_info = info_attr.read_text(encoding="utf-8") if info_attr.exists() else ""
+    if needed_line not in existing_info:
+        sep = "\n" if existing_info and not existing_info.endswith("\n") else ""
+        info_attr.write_text(existing_info + sep + needed_line + "\n", encoding="utf-8")
+
+    ga = work / ".gitattributes"
+    if ga.exists():
+        text = ga.read_text(encoding="utf-8")
+        if needed_line in text:
+            return
+        ga.write_text(text.rstrip() + "\n" + needed_line + "\n", encoding="utf-8")
+    else:
+        ga.write_text(
+            "# piki: union-merge append-only files to survive parallel ingest.\n"
+            + needed_line + "\n",
+            encoding="utf-8",
+        )
 
 
 def _read_wiki_state(wiki_dir: Path, source_repo: str) -> dict[str, str]:
