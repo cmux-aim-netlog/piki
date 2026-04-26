@@ -164,7 +164,7 @@ def _call_gemini(api_key: str, model: str, system: str, user: str) -> str:
         "contents": [{"role": "user", "parts": [{"text": user}]}],
         "generationConfig": {
             "responseMimeType": "application/json",
-            "maxOutputTokens": 8192,
+            "maxOutputTokens": 65536,
             "temperature": 0.2,
         },
     }
