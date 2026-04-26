@@ -714,3 +714,200 @@ def ingest_concepts(
     finally:
         if push:
             shutil.rmtree(work, ignore_errors=True)
+
+
+# ---------- decisions pass ----------
+
+DECISIONS_SYSTEM_PROMPT = """\
+You are an Architecture Decision Record (ADR) writer for a software team.
+Given a set of code changes, you identify non-trivial architectural decisions
+and write concise, factual ADRs. An ADR-worthy decision is one that:
+- Chooses a design pattern, library, or approach over realistic alternatives
+- Changes how two or more components interact
+- Introduces a new dependency, protocol, or data format
+- Deprecates or replaces an existing approach
+
+Skip trivial changes (typos, formatting, minor refactors with no design impact).
+Write only as many ADRs as the changes actually justify — zero is valid.
+"""
+
+DECISIONS_USER_PROMPT = """\
+# Source repo
+`{source_repo}` @ `{head_sha}`
+Today: {today}
+
+# Recent changes ({n_changes} files)
+{changes_block}
+
+# Existing ADRs (for context and numbering)
+{existing_block}
+
+# Task
+Analyze the changes above. For each distinct architectural decision, write one ADR.
+
+ADR numbering: next available number is {next_num} (zero-padded to 3 digits).
+Each ADR path must be `decisions/ADR-{next_num_fmt}-<kebab-case-title>.md`.
+If you produce multiple ADRs, increment the number for each.
+
+Each ADR must follow this exact markdown structure:
+```
+---
+type: decision
+date: {today}
+status: Accepted
+repo: {source_repo}
+commit: {head_sha_short}
+---
+# ADR-NNN: <Title>
+
+## Context
+<Why this decision was needed. What was the situation or problem?>
+
+## Decision
+<What was decided. Be concrete — name the pattern, library, or approach chosen.>
+
+## Consequences
+<What becomes easier or harder as a result. Trade-offs.>
+
+## 관련
+<relative markdown links to related repo wiki pages, e.g. [Test_BE overview](../repos/Test_BE/overview.md)>
+
+## 변경 이력
+- {today}: 최초 생성
+```
+
+Output ONLY a JSON object. No prose. No code fences.
+{{
+  "pages": [{{"path": "decisions/ADR-NNN-<title>.md", "content": "<full markdown>"}}],
+  "log_entry": "one short summary line"
+}}
+
+If no architectural decisions are found, return `{{"pages": [], "log_entry": "no-op: no ADR-worthy decisions"}}`.
+"""
+
+
+def _collect_decisions_block(wiki_dir: Path) -> tuple[str, int]:
+    """Returns (existing ADRs summary, next ADR number)."""
+    decisions_dir = wiki_dir / "decisions"
+    if not decisions_dir.exists():
+        return "(none yet)", 1
+    pages = sorted(decisions_dir.glob("ADR-*.md"))
+    if not pages:
+        return "(none yet)", 1
+    parts = []
+    max_num = 0
+    for p in pages:
+        stem = p.stem  # e.g. ADR-001-some-title
+        try:
+            num = int(stem.split("-")[1])
+            max_num = max(max_num, num)
+        except (IndexError, ValueError):
+            pass
+        body = p.read_text(encoding="utf-8", errors="ignore")
+        parts.append(f"## {p.name}\n```\n{body[:800]}\n```")
+    return "\n\n".join(parts), max_num + 1
+
+
+def ingest_decisions(
+    event_path: str = typer.Option("", envvar="GITHUB_EVENT_PATH"),
+    org: str = typer.Option("", envvar="PIKI_ORG"),
+    wiki_repo: str = typer.Option("wiki", envvar="PIKI_WIKI_REPO"),
+    source_repo: str = typer.Option("", envvar="PIKI_SOURCE_REPO"),
+    head_sha: str = typer.Option("", envvar="PIKI_HEAD_SHA"),
+    base_sha: str = typer.Option("", envvar="PIKI_BASE_SHA"),
+    gemini_key: str = typer.Option(..., envvar="GEMINI_API_KEY"),
+    github_token: str = typer.Option(..., envvar="GITHUB_TOKEN"),
+    model: str = typer.Option("gemini-2.5-pro", envvar="PIKI_MODEL"),
+    push: bool = typer.Option(True, "--push/--no-push"),
+):
+    """Generate Architecture Decision Records from recent code changes."""
+    if event_path and not org:
+        try:
+            payload = json.loads(Path(event_path).read_text(encoding="utf-8"))
+            cp = payload.get("client_payload", {})
+            org = cp.get("org", "")
+            source_repo = source_repo or cp.get("repo", "")
+            head_sha = head_sha or cp.get("sha", "")
+            base_sha = base_sha or cp.get("base_sha", "")
+        except Exception:
+            pass
+
+    if not org or not source_repo or not head_sha:
+        console.print("[red]Missing required: org, source_repo, head_sha[/]")
+        raise typer.Exit(1)
+
+    head_short = head_sha[:8]
+    console.print(f"[bold cyan]piki decisions[/] {org}/{source_repo}@{head_short}")
+
+    work = Path(tempfile.mkdtemp(prefix="piki-decisions-"))
+    try:
+        _clone_wiki(org, wiki_repo, github_token, work)
+
+        if base_sha:
+            changes = _fetch_changed_files(org, source_repo, base_sha, head_sha, github_token)
+            console.print(f"  using diff {base_sha[:8]}..{head_short} ({len(changes)} files)")
+        else:
+            tree_paths = _fetch_repo_tree(org, source_repo, head_sha, github_token)
+            changes = [{"path": p, "status": "snapshot", "patch": ""} for p in tree_paths[:30]]
+            console.print(f"  using tree snapshot ({len(changes)} files)")
+
+        existing_block, next_num = _collect_decisions_block(work)
+        today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+
+        user_prompt = DECISIONS_USER_PROMPT.format(
+            source_repo=source_repo,
+            head_sha=head_sha,
+            head_sha_short=head_short,
+            n_changes=len(changes),
+            changes_block=_changes_block(changes),
+            existing_block=existing_block,
+            next_num=next_num,
+            next_num_fmt=f"{next_num:03d}",
+            today=today,
+        )
+
+        console.print(f"  calling Gemini ({model}) for ADR generation...")
+        raw = _call_gemini(gemini_key, model, DECISIONS_SYSTEM_PROMPT, user_prompt)
+        try:
+            result = json.loads(raw)
+        except json.JSONDecodeError as exc:
+            console.print(f"[red]LLM returned invalid JSON:[/] {exc}")
+            console.print("[dim]raw[:600]:[/] " + raw[:600])
+            raise typer.Exit(3) from exc
+
+        pages = result.get("pages", []) or []
+        log_entry = result.get("log_entry", "") or f"{len(pages)} ADR(s) generated"
+
+        if not pages:
+            console.print("  [dim]no ADR-worthy decisions found[/]")
+        else:
+            for page in pages:
+                rel = page.get("path", "").lstrip("/")
+                content = page.get("content", "")
+                if not rel or not content:
+                    continue
+                if not rel.startswith("decisions/"):
+                    console.print(f"  [yellow]skip out-of-scope path:[/] {rel}")
+                    continue
+                target = work / rel
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_text(content if content.endswith("\n") else content + "\n", encoding="utf-8")
+                console.print(f"  [green]wrote[/] {rel}")
+
+            log_file = work / "log.md"
+            log_text = log_file.read_text(encoding="utf-8") if log_file.exists() else "# Sync Log\n\n"
+            ts = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+            log_text += f"- [{ts}] {source_repo}@{head_short}: {log_entry}\n"
+            log_file.write_text(log_text, encoding="utf-8")
+
+        n_bl = _inject_backlinks(work)
+        console.print(f"  [dim]backlinks updated on {n_bl} page(s)[/]")
+
+        if push:
+            pushed = _commit_and_push(work, f"piki: decisions {source_repo}@{head_short} ({len(pages)} ADR(s))")
+            console.print("[bold green]✓ pushed decisions[/]" if pushed else "  [dim]nothing to commit[/]")
+        else:
+            console.print(f"[yellow]--no-push:[/] {work}")
+    finally:
+        if push:
+            shutil.rmtree(work, ignore_errors=True)

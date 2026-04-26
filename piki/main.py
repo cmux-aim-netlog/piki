@@ -41,6 +41,7 @@ for _cmd in [
 # Register hyphenated command names explicitly (Typer keeps underscores by default).
 app.command(name="ingest-pr")(ingest_cmd.ingest_pr)
 app.command(name="ingest-concepts")(ingest_cmd.ingest_concepts)
+app.command(name="decisions")(ingest_cmd.ingest_decisions)
 
 
 @app.callback(invoke_without_command=True)
