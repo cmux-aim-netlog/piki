@@ -44,6 +44,28 @@ def _get_file_sha(owner: str, repo: str, file_path: str, branch: str, token: str
     raise RuntimeError(f"Failed to read {owner}/{repo}:{file_path} ({status}) -> {response}")
 
 
+def _list_org_repos(org: str, token: str) -> list[str]:
+    page = 1
+    repos: list[str] = []
+    while True:
+        url = f"https://api.github.com/orgs/{org}/repos?per_page=100&page={page}&type=all"
+        status, response = _github_request("GET", url, token)
+        if status != 200:
+            raise RuntimeError(f"Failed to list repos for org {org} ({status}) -> {response}")
+        if not response:
+            break
+        for repo in response:
+            if repo.get("archived") or repo.get("disabled"):
+                continue
+            name = repo.get("name", "").strip()
+            if name:
+                repos.append(name)
+        if len(response) < 100:
+            break
+        page += 1
+    return sorted(set(repos))
+
+
 def _upsert_file(
     owner: str,
     repo: str,
@@ -215,10 +237,25 @@ jobs:
 """
 
 
+def _action_guide_md(org: str, repo: str, wiki_repo: str) -> str:
+    return (
+        f"# GitHub Action Guide ({repo})\n\n"
+        "이 파일은 `piki init`으로 자동 생성되었습니다.\n\n"
+        "## 목적\n"
+        f"- `{repo}` 에서 `main` 대상 PR merge 시 `{wiki_repo}` 저장소로 이벤트를 전달합니다.\n\n"
+        "## 필수 시크릿\n"
+        "- `PIKI_BOT_TOKEN`: `repo` 권한이 있는 GitHub 토큰\n\n"
+        "## 워크플로우\n"
+        "- 파일 경로: `.github/workflows/piki-sync.yml`\n"
+        "- 트리거: `pull_request.closed` + `merged == true` + `base.ref == main`\n\n"
+        f"Organization: `{org}`\n"
+    )
+
+
 def init(
     org: str = typer.Option("cmux-aim-netlog", help="GitHub organization name."),
     wiki_repo: str = typer.Option("wiki", help="Single wiki repository name."),
-    source_repos: str = typer.Option("Test_BE,Test_FE,piki", help="Comma-separated source repos."),
+    source_repos: str = typer.Option("", help="Comma-separated source repos. Empty means all org repos."),
     token: str = typer.Option(..., envvar="GITHUB_TOKEN", help="GitHub token with contents write permissions."),
     wiki_branch: str = typer.Option("main", help="Wiki repository branch."),
     base_branch: str = typer.Option("main", help="Default source repository branch."),
@@ -226,7 +263,11 @@ def init(
     dry_run: bool = typer.Option(False, help="Print plan only without writing files."),
 ):
     """Initialize org single wiki and PR-merge triggers."""
-    repos = [name.strip() for name in source_repos.split(",") if name.strip()]
+    if source_repos.strip():
+        repos = [name.strip() for name in source_repos.split(",") if name.strip()]
+    else:
+        repos = [r for r in _list_org_repos(org, token) if r != wiki_repo]
+        console.print(f"[cyan]Auto-detected source repos[/]: {', '.join(repos) if repos else '(none)'}")
     if not repos:
         console.print("[red]No valid source repositories.[/]")
         raise typer.Exit(1)
@@ -269,7 +310,7 @@ def init(
 
     for repo in repos:
         try:
-            result = _upsert_file(
+            workflow_result = _upsert_file(
                 owner=org,
                 repo=repo,
                 file_path=".github/workflows/piki-sync.yml",
@@ -280,7 +321,21 @@ def init(
                 force_overwrite=force_overwrite,
                 dry_run=dry_run,
             )
-            console.print(f"[green]✓[/] {org}/{repo}:.github/workflows/piki-sync.yml => {result}")
+            guide_result = _upsert_file(
+                owner=org,
+                repo=repo,
+                file_path=".github/GITHUB_ACTION.md",
+                branch=base_branch,
+                content=_action_guide_md(org, repo, wiki_repo),
+                commit_message="docs(piki): add GitHub Action usage guide",
+                token=token,
+                force_overwrite=force_overwrite,
+                dry_run=dry_run,
+            )
+            console.print(
+                f"[green]✓[/] {org}/{repo}:.github/workflows/piki-sync.yml => {workflow_result}, "
+                f".github/GITHUB_ACTION.md => {guide_result}"
+            )
         except Exception as exc:  # pylint: disable=broad-except
             has_error = True
             console.print(f"[red]Failed source setup[/] {org}/{repo}: {exc}")

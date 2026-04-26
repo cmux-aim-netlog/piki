@@ -13,9 +13,12 @@ app = typer.Typer(
     help="piki — a CLI dev tool",
     add_completion=False,
 )
+wiki_app = typer.Typer(help="Wiki related commands.")
 console = Console()
 
 app.add_typer(config_app, name="config")
+wiki_app.command(name="init")(init_cmd.init)
+app.add_typer(wiki_app, name="wiki")
 
 for _cmd in [
     init_cmd.init,
