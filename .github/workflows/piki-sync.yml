@@ -1,9 +1,6 @@
 name: piki-sync-trigger
 
 on:
-  push:
-    branches:
-      - main
   pull_request:
     branches:
       - main
@@ -15,7 +12,7 @@ permissions:
 
 jobs:
   notify-piki:
-    if: github.event_name == 'push' || (github.event_name == 'pull_request' && github.event.pull_request.merged == true && github.event.pull_request.base.ref == 'main')
+    if: github.event.pull_request.merged == true && github.event.pull_request.base.ref == 'main'
     runs-on: ubuntu-latest
     steps:
       - name: Dispatch merge event to wiki repository
@@ -26,15 +23,15 @@ jobs:
           ORG: "cmux-aim-netlog"
           WIKI_REPO: "wiki"
           WIKI_BRANCH: "main"
-          SHA: "${{ github.event_name == 'push' && github.sha || github.event.pull_request.merge_commit_sha }}"
-          REF: "${{ github.event_name == 'push' && github.ref || github.event.pull_request.base.ref }}"
+          SHA: "${{ github.event.pull_request.merge_commit_sha }}"
+          REF: "${{ github.event.pull_request.base.ref }}"
           EVENT_NAME: "${{ github.event_name }}"
-          PR_NUMBER: "${{ github.event_name == 'pull_request' && github.event.pull_request.number || '' }}"
-          PR_MERGED: "${{ github.event_name == 'pull_request' && github.event.pull_request.merged || false }}"
-          BASE_REF: "${{ github.event_name == 'pull_request' && github.event.pull_request.base.ref || '' }}"
-          HEAD_REF: "${{ github.event_name == 'pull_request' && github.event.pull_request.head.ref || '' }}"
-          PR_TITLE: "${{ github.event_name == 'pull_request' && github.event.pull_request.title || '' }}"
-          PR_URL: "${{ github.event_name == 'pull_request' && github.event.pull_request.html_url || '' }}"
+          PR_NUMBER: "${{ github.event.pull_request.number }}"
+          PR_MERGED: "${{ github.event.pull_request.merged }}"
+          BASE_REF: "${{ github.event.pull_request.base.ref }}"
+          HEAD_REF: "${{ github.event.pull_request.head.ref }}"
+          PR_TITLE: "${{ github.event.pull_request.title }}"
+          PR_URL: "${{ github.event.pull_request.html_url }}"
         run: |
           if [ -z "$GH_TOKEN" ]; then
             echo "PIKI_BOT_TOKEN secret is not configured."
