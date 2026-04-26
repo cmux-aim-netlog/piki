@@ -5,3 +5,5 @@ __pycache__/
 dist/
 build/
 .piki-index.db
+.omc/
+이름 없는 문서
