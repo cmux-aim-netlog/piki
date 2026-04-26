@@ -200,6 +200,18 @@ def _wiki_log(org: str) -> str:
     return f"# Sync Log\n\n- init: wiki scaffold created for `{org}`\n"
 
 
+def _wiki_gitattributes() -> str:
+    """Tell git to union-merge log.md so parallel ingest workers don't
+    conflict on append-only files during rebase. Without this, two
+    simultaneous ingests both appending a sync line to log.md will conflict
+    when the loser tries to rebase, breaking the whole pass."""
+    return (
+        "# piki: parallel ingest workers append to log.md from the same base.\n"
+        "# Union merge keeps both lines instead of forcing a manual conflict.\n"
+        "log.md merge=union\n"
+    )
+
+
 def _wiki_dispatch_workflow() -> str:
     return """name: piki-ingest
 
@@ -478,6 +490,7 @@ def init(
 
     wiki_files = [
         ("README.md", _wiki_readme(org, wiki_repo), "chore(piki): initialize wiki repository"),
+        (".gitattributes", _wiki_gitattributes(), "chore(piki): union-merge log.md to survive parallel ingest"),
         ("piki.md", _load_pattern_doc(), "chore(piki): add piki pattern doc (constitution)"),
         ("CLAUDE.md", _wiki_schema(org, wiki_repo), "chore(piki): add wiki schema"),
         ("index.md", _wiki_index(org, wiki_repo), "chore(piki): add wiki index"),
