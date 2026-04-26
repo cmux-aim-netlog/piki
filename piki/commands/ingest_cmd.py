@@ -213,12 +213,17 @@ Allowed page paths:
 - `repos/{source_repo}/gotchas.md`     ← the most valuable type
 - `repos/{source_repo}/conventions.md`
 - `repos/{source_repo}/api.md`
+- `repos/{source_repo}/files/<relative-path>.md`   ← one page per significant source file
+- `repos/{source_repo}/symbols/<ClassName-or-function_name>.md`  ← one page per key class/function
 
 Rules (also see CLAUDE.md schema):
 - If existing pages remain accurate, OMIT them from output.
 - Each factual claim must cite source: `> src: {source_repo}@{head_sha_short}:<path>#L<a>-L<b>`.
 - If you cannot cite a claim, mark `[NEEDS HUMAN INPUT]` instead of inventing.
 - Keep frontmatter: `---\\nrepo: {source_repo}\\nlast_synced_commit: {head_sha}\\n---`.
+- Create a `files/<relative-path>.md` page for each **changed file** that has meaningful logic (skip config, lock, asset files). Link it from `overview.md` or `api.md`.
+- Create a `symbols/<Name>.md` page for each **key class or function** introduced or significantly changed. Link it from the corresponding `files/` page.
+- Every `files/` and `symbols/` page MUST contain a `관련` section with relative markdown links back to its parent pages (overview, api, or the file page that contains the symbol), so backlinks are auto-generated.
 
 **Cross-repo links (important — this builds the wiki graph)**:
 - When this repo's code clearly interacts with another repo (calls its API,
