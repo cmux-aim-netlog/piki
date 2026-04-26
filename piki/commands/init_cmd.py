@@ -1,6 +1,7 @@
 import base64
 import json
 import subprocess
+import time
 import urllib.error
 import urllib.request
 from importlib import resources
@@ -225,10 +226,12 @@ on:
 permissions:
   contents: write
 
-concurrency:
-  group: piki-ingest
-  cancel-in-progress: false
-
+# NOTE: deliberately no `concurrency:` group.
+# GitHub Actions only keeps 1 running + 1 pending per concurrency group, and any
+# 3rd dispatch evicts the previous pending one (silently cancelled). Bootstrap
+# fires N dispatches at once; with the queue, the middle (N-2) get dropped.
+# Instead we let dispatches run in parallel and rely on `piki ingest-pr`'s
+# pull-rebase-retry-on-push loop to serialize wiki commits.
 jobs:
   ingest:
     runs-on: ubuntu-latest
