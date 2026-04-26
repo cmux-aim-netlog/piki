@@ -1,12 +1,26 @@
 import base64
 import json
+import subprocess
 import urllib.error
 import urllib.request
+from pathlib import Path
 
 import typer
 from rich.console import Console
 
 console = Console()
+
+
+def _detect_current_repo_name() -> str | None:
+    """Detect the local git repository name without hardcoded values."""
+    try:
+        top_level = (
+            subprocess.check_output(["git", "rev-parse", "--show-toplevel"], stderr=subprocess.DEVNULL, text=True)
+            .strip()
+        )
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        return None
+    return Path(top_level).name if top_level else None
 
 
 def _github_request(method: str, url: str, token: str, payload: dict | None = None) -> tuple[int, dict]:
@@ -259,6 +273,11 @@ def init(
     token: str = typer.Option(..., envvar="GITHUB_TOKEN", help="GitHub token with contents write permissions."),
     wiki_branch: str = typer.Option("main", help="Wiki repository branch."),
     base_branch: str = typer.Option("main", help="Default source repository branch."),
+    sync_source_files: bool = typer.Option(
+        True,
+        "--sync-source-files/--no-sync-source-files",
+        help="Always update managed files in source repos (.github/workflows/piki-sync.yml, .github/GITHUB_ACTION.md).",
+    ),
     force_overwrite: bool = typer.Option(False, help="Overwrite existing files."),
     dry_run: bool = typer.Option(False, help="Print plan only without writing files."),
 ):
@@ -268,6 +287,21 @@ def init(
     else:
         repos = [r for r in _list_org_repos(org, token) if r != wiki_repo]
         console.print(f"[cyan]Auto-detected source repos[/]: {', '.join(repos) if repos else '(none)'}")
+
+    excluded_repos = {wiki_repo}
+    current_repo = _detect_current_repo_name()
+    if current_repo:
+        excluded_repos.add(current_repo)
+    filtered_repos = [repo for repo in repos if repo not in excluded_repos]
+    skipped_repos = sorted(set(repos) - set(filtered_repos))
+    if skipped_repos:
+        console.print(
+            "[yellow]Skipping managed repos[/]: "
+            + ", ".join(skipped_repos)
+            + " (workflow files are not created/updated there)"
+        )
+    repos = filtered_repos
+
     if not repos:
         console.print("[red]No valid source repositories.[/]")
         raise typer.Exit(1)
@@ -310,6 +344,7 @@ def init(
 
     for repo in repos:
         try:
+            source_force_overwrite = force_overwrite or sync_source_files
             workflow_result = _upsert_file(
                 owner=org,
                 repo=repo,
@@ -318,7 +353,7 @@ def init(
                 content=_source_workflow(org, repo, wiki_repo, wiki_branch),
                 commit_message="chore(piki): add PR-to-main sync trigger workflow",
                 token=token,
-                force_overwrite=force_overwrite,
+                force_overwrite=source_force_overwrite,
                 dry_run=dry_run,
             )
             guide_result = _upsert_file(
@@ -329,7 +364,7 @@ def init(
                 content=_action_guide_md(org, repo, wiki_repo),
                 commit_message="docs(piki): add GitHub Action usage guide",
                 token=token,
-                force_overwrite=force_overwrite,
+                force_overwrite=source_force_overwrite,
                 dry_run=dry_run,
             )
             console.print(
