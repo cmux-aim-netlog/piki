@@ -348,11 +348,35 @@ def _action_guide_md(org: str, repo: str, wiki_repo: str) -> str:
     )
 
 
+def _print_token_guide() -> None:
+    from rich.panel import Panel
+    from rich.text import Text
+
+    guide = Text()
+    guide.append("GITHUB_TOKEN 이 없습니다.\n\n", style="bold red")
+    guide.append("GitHub Personal Access Token (PAT) 발급 방법:\n\n", style="bold")
+    guide.append("1. ", style="bold cyan")
+    guide.append("https://github.com/settings/tokens\n")
+    guide.append("   → 우측 상단 프로필 → Settings → Developer settings → Personal access tokens\n\n")
+    guide.append("2. ", style="bold cyan")
+    guide.append("Fine-grained tokens → Generate new token\n\n")
+    guide.append("3. ", style="bold cyan")
+    guide.append("권한 설정:\n")
+    guide.append("   Repository access: All repositories (또는 wiki + source repos 선택)\n")
+    guide.append("   Permissions → Contents: Read and write\n\n")
+    guide.append("4. ", style="bold cyan")
+    guide.append("발급된 토큰을 환경변수로 주입:\n")
+    guide.append("   GITHUB_TOKEN=<token> piki init --org <org> ...\n\n", style="green")
+    guide.append("⚠️  토큰은 코드나 git에 절대 저장하지 마세요.\n", style="yellow")
+
+    console.print(Panel(guide, title="[bold]GitHub Token 설정 가이드[/]", border_style="red"))
+
+
 def init(
     org: str = typer.Option("cmux-aim-netlog", help="GitHub organization name."),
     wiki_repo: str = typer.Option("wiki", help="Single wiki repository name."),
     source_repos: str = typer.Option("", help="Comma-separated source repos. Empty means all org repos."),
-    token: str = typer.Option(..., envvar="GITHUB_TOKEN", help="GitHub token with contents write permissions."),
+    token: str = typer.Option("", envvar="GITHUB_TOKEN", help="GitHub token with contents write permissions."),
     wiki_branch: str = typer.Option("main", help="Wiki repository branch."),
     base_branch: str = typer.Option("main", help="Default source repository branch."),
     sync_source_files: bool = typer.Option(
@@ -375,6 +399,10 @@ def init(
     dry_run: bool = typer.Option(False, help="Print plan only without writing files."),
 ):
     """Initialize org single wiki and PR-merge triggers."""
+    if not token or not token.strip():
+        _print_token_guide()
+        raise typer.Exit(1)
+
     if source_repos.strip():
         repos = [name.strip() for name in source_repos.split(",") if name.strip()]
     else:
