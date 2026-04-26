@@ -18,6 +18,7 @@ Pipeline:
 
 import json
 import os
+import re
 import shutil
 import subprocess
 import tempfile
@@ -90,6 +91,7 @@ def _clone_wiki(org: str, wiki_repo: str, token: str, dest: Path) -> None:
 
 
 def _read_wiki_state(wiki_dir: Path, source_repo: str) -> dict[str, str]:
+    """Pages currently in the wiki for *this* source repo (full content)."""
     repo_dir = wiki_dir / "repos" / source_repo
     state: dict[str, str] = {}
     if repo_dir.exists():
@@ -97,6 +99,23 @@ def _read_wiki_state(wiki_dir: Path, source_repo: str) -> dict[str, str]:
             rel = str(p.relative_to(wiki_dir))
             state[rel] = p.read_text(encoding="utf-8", errors="ignore")
     return state
+
+
+def _read_neighbor_summaries(wiki_dir: Path, source_repo: str) -> dict[str, str]:
+    """Compact neighbor context: overview.md of every OTHER repo in the wiki.
+    Lets the LLM cross-reference (e.g. Test_BE ingest can link to Test_FE)."""
+    repos_dir = wiki_dir / "repos"
+    if not repos_dir.exists():
+        return {}
+    summaries: dict[str, str] = {}
+    for d in sorted(repos_dir.iterdir()):
+        if not d.is_dir() or d.name == source_repo:
+            continue
+        ov = d / "overview.md"
+        if ov.exists():
+            body = _strip_backlink_block(ov.read_text(encoding="utf-8", errors="ignore"))
+            summaries[f"repos/{d.name}/overview.md"] = body[:1500]
+    return summaries
 
 
 def _call_gemini(api_key: str, model: str, system: str, user: str) -> str:
@@ -146,6 +165,9 @@ USER_PROMPT_TEMPLATE = """\
 # Existing wiki pages for this repo
 {state_block}
 
+# Other repos in this org (overview only — for cross-references)
+{neighbors_block}
+
 # Task
 Generate or update wiki pages under `repos/{source_repo}/`.
 Allowed page paths:
@@ -159,6 +181,18 @@ Rules (also see CLAUDE.md schema):
 - Each factual claim must cite source: `> src: {source_repo}@{head_sha_short}:<path>#L<a>-L<b>`.
 - If you cannot cite a claim, mark `[NEEDS HUMAN INPUT]` instead of inventing.
 - Keep frontmatter: `---\\nrepo: {source_repo}\\nlast_synced_commit: {head_sha}\\n---`.
+
+**Cross-repo links (important — this builds the wiki graph)**:
+- When this repo's code clearly interacts with another repo (calls its API,
+  shares its types, depends on its build artifacts, follows its conventions),
+  add a relative markdown link to that repo's wiki page in your prose, e.g.
+  `[Test_FE overview](../Test_FE/overview.md)` or
+  `[Test_BE api](../Test_BE/api.md)`.
+- These links power the auto-generated Backlinks section on the linked page.
+  Without links, the wiki is a flat directory of strangers; with links, it's
+  a graph an agent can traverse.
+- Do NOT invent links to repos that don't appear in the "Other repos" block
+  above. Only link to neighbors that actually exist.
 
 Output ONLY a JSON object. No prose. No code fences.
 Schema:
@@ -195,12 +229,144 @@ def _build_system_prompt(pattern: str, schema: str) -> str:
     return (
         "You are the maintainer agent for a piki wiki. "
         "You write team knowledge pages from source-code changes.\n\n"
+        "When you reference another wiki page in your output, ALWAYS use a "
+        "relative markdown link, e.g. `[Test_FE overview](../Test_FE/overview.md)` "
+        "or `[Auth flow](../../concepts/authentication-flow.md)`. These links are "
+        "what builds the wiki graph that downstream agents navigate.\n\n"
         "## Pattern (piki.md)\n" + pattern[:6000] +
         "\n\n## Schema (CLAUDE.md)\n" + schema[:3000]
     )
 
 
-# ---------- command ----------
+# ---------- backlinks (code, no LLM) ----------
+
+WIKI_LINK_RE = re.compile(r"\[([^\]]+)\]\(([^)]+\.md[^)]*)\)")
+BL_START = "<!-- piki:backlinks-start -->"
+BL_END = "<!-- piki:backlinks-end -->"
+
+
+def _strip_backlink_block(text: str) -> str:
+    if BL_START not in text:
+        return text
+    before = text.split(BL_START)[0].rstrip()
+    after_parts = text.split(BL_END, 1)
+    after = after_parts[1] if len(after_parts) > 1 else ""
+    return before + after
+
+
+def _normalize_link(source_md: Path, raw_target: str, wiki_dir: Path) -> str | None:
+    target = raw_target.split("#")[0].split("?")[0].strip()
+    if not target.endswith(".md"):
+        return None
+    if target.startswith(("http://", "https://", "mailto:")):
+        return None
+    try:
+        resolved = (source_md.parent / target).resolve()
+        rel = resolved.relative_to(wiki_dir.resolve())
+    except (ValueError, OSError):
+        return None
+    return str(rel)
+
+
+def _inject_backlinks(wiki_dir: Path) -> int:
+    """Scan all *.md, build forward link map (page → set of pages it links to),
+    invert to backward map, then rewrite a `## Backlinks` block on each page.
+    Idempotent: previous block is stripped before computing.
+    Returns number of pages rewritten."""
+    pages = sorted(p for p in wiki_dir.rglob("*.md") if ".git" not in p.parts)
+    titles: dict[str, str] = {}
+    forward: dict[str, set[str]] = {}
+
+    for p in pages:
+        rel = str(p.relative_to(wiki_dir))
+        text = _strip_backlink_block(p.read_text(encoding="utf-8", errors="ignore"))
+        title = rel
+        for line in text.splitlines():
+            line = line.strip()
+            if line.startswith("# "):
+                title = line[2:].strip() or rel
+                break
+        titles[rel] = title
+        targets: set[str] = set()
+        for m in WIKI_LINK_RE.finditer(text):
+            norm = _normalize_link(p, m.group(2), wiki_dir)
+            if norm and norm != rel:
+                targets.add(norm)
+        forward[rel] = targets
+
+    backward: dict[str, set[str]] = {}
+    for src, targets in forward.items():
+        for tgt in targets:
+            backward.setdefault(tgt, set()).add(src)
+
+    updated = 0
+    for p in pages:
+        rel = str(p.relative_to(wiki_dir))
+        text = p.read_text(encoding="utf-8", errors="ignore")
+        stripped = _strip_backlink_block(text).rstrip()
+        bls = sorted(backward.get(rel, set()))
+        if bls:
+            link_lines = []
+            for src in bls:
+                rel_path = os.path.relpath(wiki_dir / src, p.parent)
+                link_lines.append(f"- [{titles[src]}]({rel_path})")
+            block = (
+                f"\n\n{BL_START}\n## Backlinks\n_Pages that link to this one (auto-generated)._\n\n"
+                + "\n".join(link_lines)
+                + f"\n{BL_END}\n"
+            )
+        else:
+            block = "\n"
+        new_text = stripped + block
+        if new_text != text:
+            p.write_text(new_text, encoding="utf-8")
+            updated += 1
+    return updated
+
+
+# ---------- commit + push helper (race-rebase) ----------
+
+def _commit_and_push(work: Path, message: str) -> bool:
+    """Commit staged changes and push with rebase-on-reject retry.
+    Returns True if pushed, False if nothing to commit."""
+    env = os.environ | {
+        "GIT_AUTHOR_NAME": "piki-bot",
+        "GIT_AUTHOR_EMAIL": "piki-bot@users.noreply.github.com",
+        "GIT_COMMITTER_NAME": "piki-bot",
+        "GIT_COMMITTER_EMAIL": "piki-bot@users.noreply.github.com",
+    }
+    subprocess.run(["git", "-C", str(work), "add", "."], check=True, env=env)
+    status = subprocess.run(
+        ["git", "-C", str(work), "status", "--porcelain"],
+        check=True, capture_output=True, text=True, env=env,
+    ).stdout.strip()
+    if not status:
+        return False
+    subprocess.run(
+        ["git", "-C", str(work), "commit", "-m", message],
+        check=True, env=env,
+    )
+    push_cmd = ["git", "-C", str(work), "push", "origin", "HEAD"]
+    for attempt in range(1, 6):
+        result = subprocess.run(push_cmd, env=env, capture_output=True, text=True)
+        if result.returncode == 0:
+            if attempt > 1:
+                console.print(f"  [dim](push succeeded on attempt {attempt})[/]")
+            return True
+        stderr = (result.stderr or "").strip()
+        if "rejected" not in stderr.lower() and "non-fast-forward" not in stderr.lower():
+            raise subprocess.CalledProcessError(result.returncode, push_cmd, stderr=stderr)
+        if attempt == 5:
+            raise subprocess.CalledProcessError(result.returncode, push_cmd, stderr=stderr)
+        console.print(f"  [yellow]push rejected (attempt {attempt}/5) — pulling rebase[/]")
+        subprocess.run(
+            ["git", "-C", str(work), "pull", "--rebase", "--autostash", "origin", "HEAD"],
+            check=True, env=env, capture_output=True, text=True,
+        )
+    return True
+
+
+# ---------- commands ----------
 
 def ingest_pr(
     event_path: str = typer.Option("", envvar="GITHUB_EVENT_PATH"),
@@ -261,7 +427,11 @@ def ingest_pr(
         pattern = pattern_path.read_text(encoding="utf-8") if pattern_path.exists() else _read_template("piki.md")
         schema = schema_path.read_text(encoding="utf-8") if schema_path.exists() else ""
         state = _read_wiki_state(work, source_repo)
-        console.print(f"  existing pages for {source_repo}: {len(state)}")
+        neighbors = _read_neighbor_summaries(work, source_repo)
+        console.print(
+            f"  existing pages for {source_repo}: {len(state)} | "
+            f"neighbor repo overviews: {len(neighbors)}"
+        )
 
         # 5. LLM call
         system_prompt = _build_system_prompt(pattern, schema)
@@ -271,6 +441,7 @@ def ingest_pr(
             head_sha_short=head_short,
             n_changes=len(changes),
             changes_block=_changes_block(changes),
+            neighbors_block=_state_block(neighbors),
             state_block=_state_block(state),
         )
         console.print(f"  calling Gemini ({model})...")
@@ -310,58 +481,183 @@ def ingest_pr(
         log_text += f"- [{ts}] {source_repo}@{head_short}: {log_entry}\n"
         log_file.write_text(log_text, encoding="utf-8")
 
-        # 8. Commit + push
-        if push:
-            env = os.environ | {
-                "GIT_AUTHOR_NAME": "piki-bot",
-                "GIT_AUTHOR_EMAIL": "piki-bot@users.noreply.github.com",
-                "GIT_COMMITTER_NAME": "piki-bot",
-                "GIT_COMMITTER_EMAIL": "piki-bot@users.noreply.github.com",
-            }
-            subprocess.run(["git", "-C", str(work), "add", "."], check=True, env=env)
-            status = subprocess.run(
-                ["git", "-C", str(work), "status", "--porcelain"],
-                check=True, capture_output=True, text=True, env=env,
-            ).stdout.strip()
-            if not status:
-                console.print("  [dim]wiki already up to date — nothing to commit[/]")
-                return
-            subprocess.run(
-                ["git", "-C", str(work), "commit", "-m",
-                 f"piki: ingest {source_repo}@{head_short} ({len(pages)} pages)"],
-                check=True, env=env,
-            )
+        # 8. Backlinks (code, idempotent)
+        n_bl = _inject_backlinks(work)
+        console.print(f"  [dim]backlinks updated on {n_bl} page(s)[/]")
 
-            # Push with rebase-on-reject. Multiple ingest workers may be running
-            # in parallel (the wiki workflow has no concurrency group); two of
-            # them committing simultaneously will race on push. Loser pulls and
-            # rebases its commit on top, then retries. With per-ingest commits
-            # touching different `repos/<source>/` paths, rebase auto-merges
-            # cleanly. Bounded retries to avoid pathological loops.
-            push_cmd = ["git", "-C", str(work), "push", "origin", "HEAD"]
-            max_attempts = 5
-            for attempt in range(1, max_attempts + 1):
-                result = subprocess.run(push_cmd, env=env, capture_output=True, text=True)
-                if result.returncode == 0:
-                    console.print(
-                        "[bold green]✓ pushed to wiki[/]"
-                        + (f" (after {attempt} attempts)" if attempt > 1 else "")
-                    )
-                    break
-                stderr = (result.stderr or "").strip()
-                rejected = "rejected" in stderr.lower() or "non-fast-forward" in stderr.lower()
-                if not rejected or attempt == max_attempts:
-                    console.print(f"[red]push failed:[/] {stderr}")
-                    raise subprocess.CalledProcessError(result.returncode, push_cmd, stderr=stderr)
-                console.print(
-                    f"  [yellow]push rejected (attempt {attempt}/{max_attempts}) — pulling rebase and retrying[/]"
-                )
-                subprocess.run(
-                    ["git", "-C", str(work), "pull", "--rebase", "--autostash", "origin", "HEAD"],
-                    check=True, env=env, capture_output=True, text=True,
-                )
+        # 9. Commit + push
+        if push:
+            pushed = _commit_and_push(
+                work, f"piki: ingest {source_repo}@{head_short} ({len(pages)} pages)"
+            )
+            if pushed:
+                console.print("[bold green]✓ pushed to wiki[/]")
+            else:
+                console.print("  [dim]wiki already up to date — nothing to commit[/]")
         else:
             console.print(f"[yellow]--no-push: changes left in[/] {work}")
+    finally:
+        if push:
+            shutil.rmtree(work, ignore_errors=True)
+
+
+# ---------- cross-repo concepts pass ----------
+
+CONCEPTS_USER_PROMPT = """\
+You are extracting **cross-repo concepts** for the `{org}` organization wiki.
+The wiki has per-repo pages under `repos/<repo-name>/`. Your job is to
+identify knowledge that **spans multiple repos** and capture it under
+`concepts/<topic>.md` so downstream agents can navigate the graph.
+
+# All repo pages in the wiki
+{repos_block}
+
+# Existing cross-repo concept pages
+{concepts_block}
+
+# Your task
+
+Generate or update `concepts/<topic>.md` files. Each concept page captures:
+- A flow that touches multiple repos (e.g. authentication-flow, payment-flow,
+  notification-flow).
+- A shared domain model with implementations across repos (e.g. tenant-model,
+  user-identity, billing-domain).
+- A contract / API boundary between two or more repos.
+- A naming or convention rule that should hold across repos.
+
+Rules — non-negotiable:
+- Each concept page MUST contain markdown links to the repo pages it touches,
+  e.g. `[Test_BE overview](../repos/Test_BE/overview.md)` and
+  `[Test_FE api](../repos/Test_FE/api.md)`. Use **relative paths** from
+  `concepts/<file>.md`. These links build the wiki graph.
+- Cite source code as `> src: <repo>@<sha-short>:<path>#L<a>-L<b>` OR link
+  to a wiki page that does.
+- If you cannot find evidence for a claim, mark `[NEEDS HUMAN INPUT]`.
+- Frontmatter:
+  ---
+  type: concept
+  last_synced_at: {ts}
+  links_to: [<list of repo names this concept touches>]
+  ---
+- If an existing concept page is still accurate, OMIT it from output.
+- If you cannot identify any meaningful cross-repo concept, return empty pages.
+
+Output ONLY a JSON object. No prose. No code fences.
+{{
+  "pages": [{{"path": "concepts/<topic>.md", "content": "<full markdown>"}}],
+  "log_entry": "one short summary line"
+}}
+"""
+
+
+def _collect_repos_block(wiki_dir: Path) -> tuple[str, list[str]]:
+    """Build a compact summary of all per-repo pages for the concepts prompt.
+    Returns (block_text, list_of_repo_names_seen)."""
+    repos_dir = wiki_dir / "repos"
+    if not repos_dir.exists():
+        return "(no repos/ pages found yet)", []
+    parts = []
+    repo_names = []
+    for repo_dir in sorted(d for d in repos_dir.iterdir() if d.is_dir()):
+        repo_names.append(repo_dir.name)
+        section = [f"## repos/{repo_dir.name}/"]
+        for page_name in ("overview.md", "api.md", "gotchas.md"):
+            page = repo_dir / page_name
+            if page.exists():
+                body = _strip_backlink_block(page.read_text(encoding="utf-8", errors="ignore"))
+                section.append(f"### {page_name}\n```\n{body[:2500]}\n```")
+        parts.append("\n".join(section))
+    return ("\n\n---\n\n".join(parts) if parts else "(no repo pages)"), repo_names
+
+
+def _collect_concepts_block(wiki_dir: Path) -> str:
+    concepts_dir = wiki_dir / "concepts"
+    if not concepts_dir.exists():
+        return "(none yet)"
+    parts = []
+    for p in sorted(concepts_dir.glob("*.md")):
+        body = _strip_backlink_block(p.read_text(encoding="utf-8", errors="ignore"))
+        parts.append(f"## {p.name}\n```\n{body[:2000]}\n```")
+    return "\n\n".join(parts) if parts else "(none yet)"
+
+
+def ingest_concepts(
+    org: str = typer.Option(..., envvar="PIKI_ORG"),
+    wiki_repo: str = typer.Option("wiki", envvar="PIKI_WIKI_REPO"),
+    gemini_key: str = typer.Option(..., envvar="GEMINI_API_KEY"),
+    github_token: str = typer.Option(..., envvar="GITHUB_TOKEN"),
+    model: str = typer.Option("gemini-2.5-pro", envvar="PIKI_MODEL"),
+    push: bool = typer.Option(True, "--push/--no-push"),
+):
+    """Cross-repo concept extraction. Reads all repos/* pages and produces
+    or updates concepts/*.md so the wiki has graph edges between repos.
+    Run after per-repo ingest_pr passes (workflow_run trigger handles this
+    automatically in the deployed setup)."""
+    console.print(f"[bold cyan]piki ingest-concepts[/] {org}/{wiki_repo}")
+    work = Path(tempfile.mkdtemp(prefix="piki-concepts-"))
+    try:
+        _clone_wiki(org, wiki_repo, github_token, work)
+
+        repos_block, repo_names = _collect_repos_block(work)
+        if not repo_names:
+            console.print("[yellow]No repos/ pages yet — nothing to extract concepts from. Skipping.[/]")
+            return
+        concepts_block = _collect_concepts_block(work)
+        console.print(f"  read {len(repo_names)} repos: {', '.join(repo_names)}")
+
+        pattern_path = work / "piki.md"
+        schema_path = work / "CLAUDE.md"
+        pattern = pattern_path.read_text(encoding="utf-8") if pattern_path.exists() else _read_template("piki.md")
+        schema = schema_path.read_text(encoding="utf-8") if schema_path.exists() else ""
+
+        ts_iso = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        user_prompt = CONCEPTS_USER_PROMPT.format(
+            org=org, repos_block=repos_block, concepts_block=concepts_block, ts=ts_iso,
+        )
+
+        console.print(f"  calling Gemini ({model}) for cross-repo concept extraction...")
+        raw = _call_gemini(gemini_key, model, _build_system_prompt(pattern, schema), user_prompt)
+        try:
+            result = json.loads(raw)
+        except json.JSONDecodeError as exc:
+            console.print(f"[red]LLM returned invalid JSON:[/] {exc}")
+            console.print("[dim]raw[:600]:[/] " + raw[:600])
+            raise typer.Exit(3) from exc
+
+        pages = result.get("pages", []) or []
+        log_entry = result.get("log_entry", "") or f"{len(pages)} concept(s) updated"
+
+        if not pages:
+            console.print("  [dim]no new concepts identified[/]")
+        else:
+            for page in pages:
+                rel = page.get("path", "").lstrip("/")
+                content = page.get("content", "")
+                if not rel or not content:
+                    continue
+                if not (rel.startswith("concepts/") and rel.endswith(".md")):
+                    console.print(f"  [yellow]skip out-of-scope path:[/] {rel}")
+                    continue
+                target = work / rel
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_text(content if content.endswith("\n") else content + "\n", encoding="utf-8")
+                console.print(f"  [green]wrote[/] {rel}")
+
+            log_file = work / "log.md"
+            log_text = log_file.read_text(encoding="utf-8") if log_file.exists() else "# Sync Log\n\n"
+            ts = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+            log_text += f"- [{ts}] concepts pass: {log_entry}\n"
+            log_file.write_text(log_text, encoding="utf-8")
+
+        # Always re-inject backlinks (concepts pass might have created new edges)
+        n_bl = _inject_backlinks(work)
+        console.print(f"  [dim]backlinks updated on {n_bl} page(s)[/]")
+
+        if push:
+            pushed = _commit_and_push(work, f"piki: concepts pass ({len(pages)} pages, backlinks refreshed)")
+            console.print("[bold green]✓ pushed concepts[/]" if pushed else "  [dim]nothing to commit[/]")
+        else:
+            console.print(f"[yellow]--no-push:[/] {work}")
     finally:
         if push:
             shutil.rmtree(work, ignore_errors=True)

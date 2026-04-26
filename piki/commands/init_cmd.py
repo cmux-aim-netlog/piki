@@ -261,6 +261,49 @@ jobs:
 """
 
 
+def _wiki_concepts_workflow() -> str:
+    """Workflow that runs cross-repo concept extraction. Auto-triggered after
+    every successful piki-ingest run via `workflow_run`, plus manual dispatch."""
+    return """name: piki-concepts
+
+on:
+  workflow_dispatch: {}
+  workflow_run:
+    workflows: [piki-ingest]
+    types: [completed]
+
+permissions:
+  contents: write
+
+# One concepts pass at a time; if a new ingest finishes while we run,
+# cancel + restart so we always converge on the latest wiki state.
+concurrency:
+  group: piki-concepts
+  cancel-in-progress: true
+
+jobs:
+  concepts:
+    runs-on: ubuntu-latest
+    # Skip if the upstream ingest run failed or was cancelled.
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      github.event.workflow_run.conclusion == 'success'
+    steps:
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install piki
+        run: pip install --quiet "git+https://github.com/cmux-aim-netlog/piki.git@main"
+      - name: Run concept extraction
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GITHUB_TOKEN: ${{ secrets.PIKI_BOT_TOKEN }}
+          PIKI_ORG: ${{ github.repository_owner }}
+          PIKI_WIKI_REPO: ${{ github.event.repository.name }}
+        run: piki ingest-concepts
+"""
+
+
 def _source_workflow(org: str, repo: str, wiki_repo: str, wiki_branch: str) -> str:
     return f"""name: piki-sync-trigger
 
@@ -446,6 +489,11 @@ def init(
             ".github/workflows/piki-ingest.yml",
             _wiki_dispatch_workflow(),
             "chore(piki): add LLM ingest workflow (repository_dispatch + workflow_dispatch)",
+        ),
+        (
+            ".github/workflows/piki-concepts.yml",
+            _wiki_concepts_workflow(),
+            "chore(piki): add cross-repo concepts workflow (workflow_run on piki-ingest)",
         ),
     ]
 
