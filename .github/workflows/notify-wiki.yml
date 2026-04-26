@@ -1,0 +1,31 @@
+name: Notify Wiki
+
+on:
+  pull_request:
+    types:
+      - closed
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  notify:
+    if: github.event.pull_request.merged == true
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Dispatch wiki ingest
+        uses: peter-evans/repository-dispatch@v3
+        with:
+          token: ${{ secrets.WIKI_DISPATCH_TOKEN }}
+          repository: cmux-aim-netlog/wiki
+          event-type: source-repo-merged
+          client-payload: |
+            {
+              "source_repo": "${{ github.repository }}",
+              "pr_number": "${{ github.event.pull_request.number }}",
+              "merge_commit_sha": "${{ github.event.pull_request.merge_commit_sha }}",
+              "base_branch": "main"
+            }
