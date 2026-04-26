@@ -217,13 +217,15 @@ Allowed page paths:
 - `repos/{source_repo}/symbols/<ClassName-or-function_name>.md`  ← one page per key class/function
 
 Rules (also see CLAUDE.md schema):
-- If existing pages remain accurate, OMIT them from output.
+- If existing pages remain accurate AND the corresponding source file is NOT in the recent changes list, OMIT them from output.
+- If a source file appears in the recent changes list, its `files/` page MUST be included in output — even if the change looks minor.
 - Each factual claim must cite source: `> src: {source_repo}@{head_sha_short}:<path>#L<a>-L<b>`.
 - If you cannot cite a claim, mark `[NEEDS HUMAN INPUT]` instead of inventing.
 - Keep frontmatter: `---\\nrepo: {source_repo}\\nlast_synced_commit: {head_sha}\\n---`.
 - Create a `files/<relative-path>.md` page for each **changed file** that has meaningful logic (skip config, lock, asset files). Link it from `overview.md` or `api.md`.
 - Create a `symbols/<Name>.md` page for each **key class or function** introduced or significantly changed. Link it from the corresponding `files/` page.
 - Every `files/` and `symbols/` page MUST contain a `관련` section with relative markdown links back to its parent pages (overview, api, or the file page that contains the symbol), so backlinks are auto-generated.
+- Every page MUST end with a `## 변경 이력` section. When creating a new page add `- {today}: 최초 생성`. When updating an existing page, append `- {today}: <한 줄 변경 요약>` to the existing entries (keep all prior entries).
 
 **Cross-repo links (important — this builds the wiki graph)**:
 - When this repo's code clearly interacts with another repo (calls its API,
@@ -486,6 +488,7 @@ def ingest_pr(
             changes_block=_changes_block(changes),
             neighbors_block=_state_block(neighbors),
             state_block=_state_block(state),
+            today=datetime.now(timezone.utc).strftime("%Y-%m-%d"),
         )
         console.print(f"  calling Gemini ({model})...")
         raw = _call_gemini(gemini_key, model, system_prompt, user_prompt)
