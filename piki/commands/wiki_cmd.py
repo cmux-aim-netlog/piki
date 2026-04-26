@@ -1,5 +1,6 @@
 import subprocess
 from pathlib import Path
+from datetime import datetime
 
 import typer
 from rich.console import Console
@@ -42,6 +43,56 @@ def sync():
     console.print("[dim]Rebuilding index...[/]")
     db.build_index()
     console.print("[green]✓[/] Wiki synced.")
+
+
+def ingest(
+    retries: int = typer.Option(2, "--retries", help="How many times to retry git pull on failure."),
+):
+    """Ingest latest wiki and generate graph-wiki snapshot."""
+    if not WIKI_DIR.exists():
+        console.print("[yellow]Wiki not set up. Running setup first...[/]")
+        setup()
+        return
+
+    pull_ok = False
+    for attempt in range(1, retries + 2):
+        result = subprocess.run(["git", "-C", str(WIKI_DIR), "pull"], capture_output=True, text=True)
+        if result.returncode == 0:
+            pull_ok = True
+            if result.stdout.strip():
+                console.print(result.stdout.strip())
+            break
+        console.print(f"[yellow]Pull failed (attempt {attempt})[/]: {result.stderr.strip()}")
+
+    if not pull_ok:
+        console.print("[yellow]Proceeding with local wiki only (pull failed).[/]")
+
+    db.build_index()
+    graph_path = WIKI_DIR / "graph-wiki.md"
+    pages = sorted([p for p in WIKI_DIR.rglob("*.md") if ".git" not in p.parts])
+    decisions = sorted((WIKI_DIR / "decisions").glob("*.md")) if (WIKI_DIR / "decisions").exists() else []
+    concepts = sorted((WIKI_DIR / "concepts").glob("*.md")) if (WIKI_DIR / "concepts").exists() else []
+
+    graph_lines = [
+        "# graph-wiki",
+        "",
+        f"- generated_at: {datetime.utcnow().isoformat()}Z",
+        f"- total_pages: {len(pages)}",
+        f"- decisions_count: {len(decisions)}",
+        f"- concepts_count: {len(concepts)}",
+        "",
+        "## decisions",
+    ]
+    graph_lines.extend([f"- {p.relative_to(WIKI_DIR)}" for p in decisions] or ["- (none)"])
+    graph_lines.append("")
+    graph_lines.append("## concepts")
+    graph_lines.extend([f"- {p.relative_to(WIKI_DIR)}" for p in concepts] or ["- (none)"])
+    graph_lines.append("")
+
+    graph_path.write_text("\n".join(graph_lines) + "\n", encoding="utf-8")
+    console.print(f"[green]✓[/] Ingest complete. Graph created: {graph_path}")
+    if not pull_ok:
+        console.print("[yellow]Warning[/] ingest ran in fallback mode due to pull failure.")
 
 
 def search(query: str):
@@ -97,3 +148,17 @@ def adr(topic: str = typer.Option("", "--topic", "-t", help="Topic to search for
         for p in pages:
             table.add_row(str(p.relative_to(WIKI_DIR)))
         console.print(table)
+
+
+def serve(
+    port: int = typer.Option(8787, "--port", "-p", help="Local port to serve the wiki directory."),
+):
+    """Serve local wiki directory to inspect decision history in browser."""
+    _require_wiki()
+    console.print(f"[bold]Serving wiki[/] {WIKI_DIR} at [cyan]http://127.0.0.1:{port}[/]")
+    console.print("[dim]Press Ctrl+C to stop.[/]")
+    raise typer.Exit(
+        subprocess.call(
+            ["python3", "-m", "http.server", str(port), "--directory", str(WIKI_DIR)]
+        )
+    )
