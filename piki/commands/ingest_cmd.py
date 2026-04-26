@@ -331,8 +331,35 @@ def ingest_pr(
                  f"piki: ingest {source_repo}@{head_short} ({len(pages)} pages)"],
                 check=True, env=env,
             )
-            subprocess.run(["git", "-C", str(work), "push", "origin", "HEAD"], check=True, env=env)
-            console.print("[bold green]✓ pushed to wiki[/]")
+
+            # Push with rebase-on-reject. Multiple ingest workers may be running
+            # in parallel (the wiki workflow has no concurrency group); two of
+            # them committing simultaneously will race on push. Loser pulls and
+            # rebases its commit on top, then retries. With per-ingest commits
+            # touching different `repos/<source>/` paths, rebase auto-merges
+            # cleanly. Bounded retries to avoid pathological loops.
+            push_cmd = ["git", "-C", str(work), "push", "origin", "HEAD"]
+            max_attempts = 5
+            for attempt in range(1, max_attempts + 1):
+                result = subprocess.run(push_cmd, env=env, capture_output=True, text=True)
+                if result.returncode == 0:
+                    console.print(
+                        "[bold green]✓ pushed to wiki[/]"
+                        + (f" (after {attempt} attempts)" if attempt > 1 else "")
+                    )
+                    break
+                stderr = (result.stderr or "").strip()
+                rejected = "rejected" in stderr.lower() or "non-fast-forward" in stderr.lower()
+                if not rejected or attempt == max_attempts:
+                    console.print(f"[red]push failed:[/] {stderr}")
+                    raise subprocess.CalledProcessError(result.returncode, push_cmd, stderr=stderr)
+                console.print(
+                    f"  [yellow]push rejected (attempt {attempt}/{max_attempts}) — pulling rebase and retrying[/]"
+                )
+                subprocess.run(
+                    ["git", "-C", str(work), "pull", "--rebase", "--autostash", "origin", "HEAD"],
+                    check=True, env=env, capture_output=True, text=True,
+                )
         else:
             console.print(f"[yellow]--no-push: changes left in[/] {work}")
     finally:
