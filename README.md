@@ -19,10 +19,10 @@ piki install
 
 # 3) GitHub Org 초기화 (단일 wiki repo + source repo 액션 설정)
 #    GITHUB_TOKEN은 쉘 환경변수로만 주입 (코드/깃에 절대 저장 금지)
-GITHUB_TOKEN=<token> piki init --org cmux-aim-netlog --wiki-repo wiki --source-repos Test_BE,Test_FE,piki --dry-run
-GITHUB_TOKEN=<token> piki init --org cmux-aim-netlog --wiki-repo wiki --source-repos Test_BE,Test_FE,piki
+GITHUB_TOKEN=<token> piki init --org cmux-aim-netlog --wiki-repo wiki --source-repos Test_BE,Test_FE --dry-run
+GITHUB_TOKEN=<token> piki init --org cmux-aim-netlog --wiki-repo wiki --source-repos Test_BE,Test_FE
 # 기존 source repo의 piki 관리 파일을 유지하려면(덮어쓰기 비활성화):
-GITHUB_TOKEN=<token> piki init --org cmux-aim-netlog --wiki-repo wiki --source-repos Test_BE,Test_FE,piki --no-sync-source-files
+GITHUB_TOKEN=<token> piki init --org cmux-aim-netlog --wiki-repo wiki --source-repos Test_BE,Test_FE --no-sync-source-files
 
 # 4) ingest 1회 실행 (graph-wiki 생성)
 piki ingest
@@ -36,11 +36,12 @@ piki serve --port 8787
 ### bootstrap
 
 ```bash
-piki init --org cmux-aim-netlog --wiki-repo wiki --source-repos Test_BE,Test_FE,piki --dry-run
+piki init --org cmux-aim-netlog --wiki-repo wiki --source-repos Test_BE,Test_FE --dry-run
 # 실제 반영 시:
-# GITHUB_TOKEN=<token> piki init --org cmux-aim-netlog --wiki-repo wiki --source-repos Test_BE,Test_FE,piki
+# GITHUB_TOKEN=<token> piki init --org cmux-aim-netlog --wiki-repo wiki --source-repos Test_BE,Test_FE
 # source repo의 piki 관리 파일 자동 갱신을 끄려면:
-# GITHUB_TOKEN=<token> piki init --org cmux-aim-netlog --wiki-repo wiki --source-repos Test_BE,Test_FE,piki --no-sync-source-files
+# GITHUB_TOKEN=<token> piki init --org cmux-aim-netlog --wiki-repo wiki --source-repos Test_BE,Test_FE --no-sync-source-files
+# 참고: init을 실행한 현재 레포와 wiki 레포는 source 대상에서 자동 제외됩니다.
 ```
 
 ### skill

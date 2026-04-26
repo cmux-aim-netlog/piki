@@ -1,12 +1,26 @@
 import base64
 import json
+import subprocess
 import urllib.error
 import urllib.request
+from pathlib import Path
 
 import typer
 from rich.console import Console
 
 console = Console()
+
+
+def _detect_current_repo_name() -> str | None:
+    """Detect the local git repository name without hardcoded values."""
+    try:
+        top_level = (
+            subprocess.check_output(["git", "rev-parse", "--show-toplevel"], stderr=subprocess.DEVNULL, text=True)
+            .strip()
+        )
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        return None
+    return Path(top_level).name if top_level else None
 
 
 def _github_request(method: str, url: str, token: str, payload: dict | None = None) -> tuple[int, dict]:
@@ -273,6 +287,21 @@ def init(
     else:
         repos = [r for r in _list_org_repos(org, token) if r != wiki_repo]
         console.print(f"[cyan]Auto-detected source repos[/]: {', '.join(repos) if repos else '(none)'}")
+
+    excluded_repos = {wiki_repo}
+    current_repo = _detect_current_repo_name()
+    if current_repo:
+        excluded_repos.add(current_repo)
+    filtered_repos = [repo for repo in repos if repo not in excluded_repos]
+    skipped_repos = sorted(set(repos) - set(filtered_repos))
+    if skipped_repos:
+        console.print(
+            "[yellow]Skipping managed repos[/]: "
+            + ", ".join(skipped_repos)
+            + " (workflow files are not created/updated there)"
+        )
+    repos = filtered_repos
+
     if not repos:
         console.print("[red]No valid source repositories.[/]")
         raise typer.Exit(1)
