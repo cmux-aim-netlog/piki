@@ -3,6 +3,7 @@ import json
 import subprocess
 import urllib.error
 import urllib.request
+from importlib import resources
 from pathlib import Path
 
 import typer
@@ -21,6 +22,11 @@ def _detect_current_repo_name() -> str | None:
     except (subprocess.CalledProcessError, FileNotFoundError):
         return None
     return Path(top_level).name if top_level else None
+
+
+def _load_pattern_doc() -> str:
+    """Load piki.md (the pattern/constitution doc) bundled with the package."""
+    return resources.files("piki.templates").joinpath("piki.md").read_text(encoding="utf-8")
 
 
 def _github_request(method: str, url: str, token: str, payload: dict | None = None) -> tuple[int, dict]:
@@ -311,6 +317,7 @@ def init(
 
     wiki_files = [
         ("README.md", _wiki_readme(org, wiki_repo), "chore(piki): initialize wiki repository"),
+        ("piki.md", _load_pattern_doc(), "chore(piki): add piki pattern doc (constitution)"),
         ("CLAUDE.md", _wiki_schema(org, wiki_repo), "chore(piki): add wiki schema"),
         ("index.md", _wiki_index(org, wiki_repo), "chore(piki): add wiki index"),
         ("log.md", _wiki_log(org), "chore(piki): add wiki sync log"),

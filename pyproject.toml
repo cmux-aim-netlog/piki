@@ -39,3 +39,6 @@ piki = "piki.main:app"
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["piki*"]
+
+[tool.setuptools.package-data]
+"piki.templates" = ["*.md"]
