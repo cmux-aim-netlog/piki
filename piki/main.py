@@ -8,6 +8,7 @@ from piki.commands import wiki_cmd
 from piki.commands import init_cmd
 from piki.commands import skill_cmd
 from piki.commands import ingest_cmd
+from piki.commands import show_cmd
 
 app = typer.Typer(
     name="piki",
@@ -33,6 +34,7 @@ for _cmd in [
     wiki_cmd.gotchas,
     wiki_cmd.adr,
     wiki_cmd.serve,
+    show_cmd.show,
 ]:
     app.command()(_cmd)
 
