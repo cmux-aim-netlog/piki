@@ -5,12 +5,33 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "piki"
 version = "0.1.0"
-description = "A CLI dev tool"
+description = "Team wiki context hub for coding agents"
+readme = "README.md"
+license = { text = "MIT" }
 requires-python = ">=3.10"
+authors = [{ name = "cmux-aim-netlog" }]
+keywords = ["wiki", "cli", "developer-tools", "ai", "agents"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Software Development :: Documentation",
+    "Topic :: Utilities",
+]
 dependencies = [
     "typer>=0.12",
     "rich>=13",
 ]
+
+[project.urls]
+Homepage = "https://github.com/cmux-aim-netlog/piki"
+Repository = "https://github.com/cmux-aim-netlog/piki"
+Issues = "https://github.com/cmux-aim-netlog/piki/issues"
 
 [project.scripts]
 piki = "piki.main:app"
