@@ -1,7 +1,8 @@
 import sqlite3
 from pathlib import Path
 
-WIKI_DIR = Path.home() / ".wiki"
+from piki.wiki import WIKI_DIR
+
 DB_PATH = WIKI_DIR / ".piki-index.db"
 
 

@@ -4,10 +4,7 @@ from pathlib import Path
 import typer
 from rich.console import Console
 
-from piki.wiki import db, render
-
-WIKI_DIR = Path.home() / ".wiki"
-WIKI_REPO = "https://github.com/cmux-aim-netlog/wiki.git"
+from piki.wiki import WIKI_DIR, WIKI_REPO, db, render
 
 app = typer.Typer(help="piki wiki — team context hub for coding agents.")
 console = Console()

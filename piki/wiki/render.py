@@ -1,10 +1,9 @@
-from pathlib import Path
-
 from rich.console import Console
 from rich.markdown import Markdown
 from rich.panel import Panel
 
-WIKI_DIR = Path.home() / ".wiki"
+from piki.wiki import WIKI_DIR
+
 console = Console()
 
 

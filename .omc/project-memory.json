@@ -1,0 +1,171 @@
+{
+  "version": "1.0.0",
+  "lastScanned": 1777165979422,
+  "projectRoot": "/home/jaewon/jaewon/ter",
+  "techStack": {
+    "languages": [
+      {
+        "name": "Python",
+        "version": null,
+        "confidence": "high",
+        "markers": [
+          "pyproject.toml"
+        ]
+      }
+    ],
+    "frameworks": [],
+    "packageManager": null,
+    "runtime": null
+  },
+  "build": {
+    "buildCommand": null,
+    "testCommand": "pytest",
+    "lintCommand": "ruff check",
+    "devCommand": null,
+    "scripts": {}
+  },
+  "conventions": {
+    "namingStyle": null,
+    "importStyle": null,
+    "testPattern": null,
+    "fileOrganization": null
+  },
+  "structure": {
+    "isMonorepo": false,
+    "workspaces": [],
+    "mainDirectories": [],
+    "gitBranches": null
+  },
+  "customNotes": [],
+  "directoryMap": {
+    "ter": {
+      "path": "ter",
+      "purpose": null,
+      "fileCount": 3,
+      "lastAccessed": 1777165979415,
+      "keyFiles": [
+        "__init__.py",
+        "config.py",
+        "main.py"
+      ]
+    },
+    "ter.egg-info": {
+      "path": "ter.egg-info",
+      "purpose": null,
+      "fileCount": 6,
+      "lastAccessed": 1777165979416,
+      "keyFiles": [
+        "PKG-INFO",
+        "SOURCES.txt",
+        "dependency_links.txt",
+        "entry_points.txt",
+        "requires.txt"
+      ]
+    }
+  },
+  "hotPaths": [
+    {
+      "path": "pyproject.toml",
+      "accessCount": 3,
+      "lastAccessed": 1777178916245,
+      "type": "file"
+    },
+    {
+      "path": "piki/wiki/db.py",
+      "accessCount": 3,
+      "lastAccessed": 1777178988967,
+      "type": "file"
+    },
+    {
+      "path": "ter/main.py",
+      "accessCount": 2,
+      "lastAccessed": 1777176659289,
+      "type": "file"
+    },
+    {
+      "path": "ter/config.py",
+      "accessCount": 2,
+      "lastAccessed": 1777176659460,
+      "type": "file"
+    },
+    {
+      "path": "ter/commands/config_cmd.py",
+      "accessCount": 2,
+      "lastAccessed": 1777176662148,
+      "type": "file"
+    },
+    {
+      "path": "piki/wiki/__init__.py",
+      "accessCount": 2,
+      "lastAccessed": 1777178974262,
+      "type": "file"
+    },
+    {
+      "path": "piki/wiki/render.py",
+      "accessCount": 2,
+      "lastAccessed": 1777178980476,
+      "type": "file"
+    },
+    {
+      "path": "piki/commands/wiki_cmd.py",
+      "accessCount": 2,
+      "lastAccessed": 1777178982811,
+      "type": "file"
+    },
+    {
+      "path": "ter/__init__.py",
+      "accessCount": 1,
+      "lastAccessed": 1777176579455,
+      "type": "file"
+    },
+    {
+      "path": "ter/commands/__init__.py",
+      "accessCount": 1,
+      "lastAccessed": 1777176584724,
+      "type": "file"
+    },
+    {
+      "path": "piki/main.py",
+      "accessCount": 1,
+      "lastAccessed": 1777178915235,
+      "type": "file"
+    },
+    {
+      "path": "piki/config.py",
+      "accessCount": 1,
+      "lastAccessed": 1777178915888,
+      "type": "file"
+    },
+    {
+      "path": "piki/commands/config_cmd.py",
+      "accessCount": 1,
+      "lastAccessed": 1777178920171,
+      "type": "file"
+    },
+    {
+      "path": "piki/__init__.py",
+      "accessCount": 1,
+      "lastAccessed": 1777178921335,
+      "type": "file"
+    },
+    {
+      "path": "SKILL.md",
+      "accessCount": 1,
+      "lastAccessed": 1777178931450,
+      "type": "file"
+    },
+    {
+      "path": "piki/commands/__init__.py",
+      "accessCount": 1,
+      "lastAccessed": 1777178932292,
+      "type": "file"
+    },
+    {
+      "path": "README.md",
+      "accessCount": 1,
+      "lastAccessed": 1777179056588,
+      "type": "file"
+    }
+  ],
+  "userDirectives": []
+}
