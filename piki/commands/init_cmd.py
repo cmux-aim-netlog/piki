@@ -86,6 +86,46 @@ def _list_org_repos(org: str, token: str) -> list[str]:
     return sorted(set(repos))
 
 
+def _get_branch_sha(org: str, repo: str, branch: str, token: str) -> str | None:
+    url = f"https://api.github.com/repos/{org}/{repo}/branches/{branch}"
+    status, response = _github_request("GET", url, token)
+    if status == 200:
+        return response.get("commit", {}).get("sha")
+    if status == 404:
+        return None
+    raise RuntimeError(f"Failed to read branch {org}/{repo}@{branch} ({status}) -> {response}")
+
+
+def _trigger_ingest_workflow(
+    org: str,
+    wiki_repo: str,
+    source_repo: str,
+    head_sha: str,
+    wiki_branch: str,
+    token: str,
+    workflow_file: str = "piki-ingest.yml",
+) -> None:
+    """Fire workflow_dispatch on the wiki repo's piki-ingest workflow.
+
+    Requires the caller's token to have `actions:write` on the wiki repo.
+    """
+    url = f"https://api.github.com/repos/{org}/{wiki_repo}/actions/workflows/{workflow_file}/dispatches"
+    payload = {
+        "ref": wiki_branch,
+        "inputs": {
+            "org": org,
+            "source_repo": source_repo,
+            "head_sha": head_sha,
+        },
+    }
+    status, response = _github_request("POST", url, token, payload)
+    if status not in (200, 204):
+        raise RuntimeError(
+            f"Failed to dispatch ingest for {source_repo} ({status}) -> {response}. "
+            "Token may need `actions:write` on the wiki repo."
+        )
+
+
 def _upsert_file(
     owner: str,
     repo: str,
@@ -298,6 +338,9 @@ def _action_guide_md(org: str, repo: str, wiki_repo: str) -> str:
         "## 필수 시크릿 (Org-level Actions secret 권장)\n"
         "- `PIKI_BOT_TOKEN`: source repo `contents:read` + wiki repo `contents:write` 권한이 있는 GitHub 토큰.\n"
         f"- `GEMINI_API_KEY`: Gemini API key. `{wiki_repo}` 의 ingest workflow가 LLM 호출 시 사용.\n\n"
+        "## `piki init` 실행 시 로컬 GITHUB_TOKEN 권한\n"
+        f"- source repo / `{wiki_repo}` 양쪽에 `contents:write`\n"
+        f"- `{wiki_repo}` 에 `actions:write` (init `--bootstrap` 단계가 workflow_dispatch 호출)\n\n"
         "## 워크플로우\n"
         f"- 트리거 (source side): `{repo}/.github/workflows/piki-sync.yml` — `pull_request.closed` + `merged == true` + `base.ref == main` → `repository_dispatch` to `{wiki_repo}`.\n"
         f"- ingest (wiki side): `{wiki_repo}/.github/workflows/piki-ingest.yml` — `repository_dispatch` 또는 `workflow_dispatch` 로 실행.\n\n"
@@ -316,6 +359,17 @@ def init(
         True,
         "--sync-source-files/--no-sync-source-files",
         help="Always update managed files in source repos (.github/workflows/piki-sync.yml, .github/GITHUB_ACTION.md).",
+    ),
+    bootstrap: bool = typer.Option(
+        True,
+        "--bootstrap/--no-bootstrap",
+        help=(
+            "After scaffold + workflow setup, fire workflow_dispatch on the wiki's "
+            "piki-ingest workflow for each source repo at its current main HEAD so "
+            "the wiki has real content immediately (no need to wait for a PR). "
+            "Requires GEMINI_API_KEY and PIKI_BOT_TOKEN as Org Actions secrets, and "
+            "the local GITHUB_TOKEN to have actions:write on the wiki repo."
+        ),
     ),
     force_overwrite: bool = typer.Option(False, help="Overwrite existing files."),
     dry_run: bool = typer.Option(False, help="Print plan only without writing files."),
@@ -415,6 +469,42 @@ def init(
             has_error = True
             console.print(f"[red]Failed source setup[/] {org}/{repo}: {exc}")
 
+    # Phase 3: bootstrap initial ingest so the wiki has real content
+    # immediately, instead of staying empty until someone merges a PR.
+    if bootstrap and repos and not has_error:
+        console.print(f"\n[bold]Bootstrap: triggering initial ingest for {len(repos)} source repo(s)[/]")
+        actions_url = f"https://github.com/{org}/{wiki_repo}/actions/workflows/piki-ingest.yml"
+        for repo in repos:
+            try:
+                if dry_run:
+                    console.print(f"[dim][DRY-RUN][/dim] would dispatch ingest for {org}/{repo}@{base_branch}")
+                    continue
+                sha = _get_branch_sha(org, repo, base_branch, token)
+                if not sha:
+                    console.print(f"[yellow]skip[/] {repo}: no `{base_branch}` branch")
+                    continue
+                _trigger_ingest_workflow(
+                    org=org,
+                    wiki_repo=wiki_repo,
+                    source_repo=repo,
+                    head_sha=sha,
+                    wiki_branch=wiki_branch,
+                    token=token,
+                )
+                console.print(f"[green]✓[/] dispatched ingest for {repo}@{sha[:8]}")
+            except Exception as exc:  # pylint: disable=broad-except
+                # Non-fatal: init succeeded; bootstrap is a best-effort convenience.
+                console.print(f"[yellow]bootstrap skipped for {repo}[/]: {exc}")
+        if not dry_run:
+            console.print(f"  [dim]watch progress:[/] {actions_url}")
+    elif bootstrap and has_error:
+        console.print("[yellow]Skipping bootstrap because earlier setup steps failed.[/]")
+
     if has_error:
         raise typer.Exit(1)
     console.print("\n[bold green]Done.[/] piki init completed.")
+    if bootstrap and not dry_run and repos:
+        console.print(
+            "[dim]The wiki will populate over the next 1–2 minutes as each ingest "
+            "workflow finishes. Run `piki setup` (or `piki sync`) to pull the result.[/]"
+        )
